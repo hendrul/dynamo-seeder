@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SamVerschueren/dynamo-seeder.git"
+    "url": "git+https://github.com/hendrul/dynamo-seeder.git"
   },
   "keywords": [
     "dynamodb",
@@ -24,12 +24,7 @@
     "index.js"
   ],
   "dependencies": {
-    "chalk": "^1.1.1",
-    "dynongo": "^0.7.0",
-    "lodash": "^4.11.1",
-    "moment": "^2.13.0",
-    "object-assign": "^4.0.1",
-    "pinkie-promise": "^2.0.1"
+    "aws-sdk": "^2.4.13"
   },
   "devDependencies": {
     "xo": "*"

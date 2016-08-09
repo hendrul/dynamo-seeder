@@ -1,100 +1,73 @@
 'use strict';
 var vm = require('vm');
 var path = require('path');
-var Promise = require('pinkie-promise');
-var db = require('dynongo');
-var objectAssign = require('object-assign');
-var _ = require('lodash');
-var chalk = require('chalk');
-var moment = require('moment');
+var AWS = require('aws-sdk');
 
 module.exports = (function () {
 	var DEFAULT_OPTIONS = {
 		dropTables: false
 	};
 
-	var _this = {
+	var $this = {
 		options: {},
 		sandbox: {},
 		seed: function (data) {
+			var self = this;
+
 			try {
 				// Iterate over all the dependencies
-				Object.keys(data._dependencies || {}).forEach(function (key) {
-					if (this.sandbox[key] !== undefined) {
+				Object.keys(data['_dependencies'] || {}).forEach(function (key) {
+					if (self.sandbox[key] !== undefined) {
 						// Do nothing if the dependency is already defined globally
 						return;
 					}
 
 					// Load the dependency
-					this.sandbox[key] = module.parent.require(data._dependencies[key]);
-				}.bind(this));
+					self.sandbox[key] = module.parent.require(data['_dependencies'][key]);
+				});
 
-				// Remove the dependencies
-				delete data._dependencies;
+				delete data['_dependencies'];
 
-				return Object.keys(data).reduce(function (promise, groupKey) {
-					var group = data[groupKey];
-					var schema = require(path.join(process.cwd(), group._schema));
-					var tableName = schema.TableName;
-					var Table = db.table(schema.TableName);
+				var promises = Object.keys(data).map(tableName => {
 
-					// Delete the schema property
-					delete group._schema;
+					// Schema path is relative to the referer (a data file)
+					var schemaPath = path.join(path.dirname(dataFile), data[tableName]['_schema']);
+					var schema = require(schemaPath);
 
-					if (this.options.dropTables === true) {
-						// If dropTables is set to true, drop the table
-						promise = promise.then(function () {
-							// Log event
-							_this.log(chalk.green.bold('Drop table: ') + tableName);
+					delete data['_schema'];
 
-							// Create the table
-							return db.dropTable(tableName).await().exec();
-						});
+					return ()=> {
+						var promise = Promise.resolve();
+						if (self.options.dropTables === true) {
+							promise = promise.then(()=> $this.dynamo.deleteTable({TableName: tableName}));
+						}
+
+						// Allways create the table
+						promise = promise.then(()=> $this.dynamo.createTable(schema));
+
+						// Insert records promises
+						return promise.then(
+							()=> Promise.all(
+								(data[tableName].data||[]).map(record => {
+									var unwinded = $this.unwind(record);
+									return $this.docClient.insert({
+										TableName: tableName,
+										Item: unwinded
+									});
+								})
+							)
+						);
 					}
+				});
 
-					// Allways create the table
-					promise = promise.then(function () {
-						// Log event
-						_this.log(chalk.green.bold('Create table: ') + tableName);
+				var serie = Promise.resolve();
+				promises.forEach(runPromise => serie = serie.then(()=> runPromise()));
 
-						// Create the table
-						return db.createTable(schema).await().exec();
-					}).then(function () {
-						// Unwind the group
-						var unwinded = _this.unwind(group);
-
-						// Create an array of insert promises
-						var inserts = Object.keys(unwinded).map(function (key) {
-							// Extract the key and the data object
-							var item = _this.split(unwinded[key], schema);
-
-							// Create an insert promise
-							return Table.insert(item.key, item.data).exec();
-						});
-
-						// Log the event
-						_this.log(chalk.green.bold('Insert ' + inserts.length + ' items: ') + tableName);
-
-						// Execute all the promises
-						return Promise.all(inserts);
-					});
-
-					return promise;
-				}.bind(this), Promise.resolve());
+				return serie;
 			} catch (err) {
 				// Reject the method if something went wrong
 				return Promise.reject(err);
 			}
-		},
-		split: function (data, schema) {
-			// Retrieve the key properties
-			var keyProps = _.map(schema.KeySchema, 'AttributeName');
-
-			// Return the key and data
-			return {
-				key: _.pick(data, keyProps),
-				data: _.omit(data, keyProps)
-			};
 		},
 		/**
 		 * This method unwinds an object and iterates over every property in the object.
@@ -105,9 +78,10 @@ module.exports = (function () {
 		 * @return {Object}	 The object with the correct references.
 		 */
 		unwind: function (obj) {
-			return _.mapValues(obj, function (value) {
-				return _this.parseValue(obj, value);
-			});
+			for(var key in obj) {
+				obj[key] = $this.parseValue(obj, obj[key]);
+			}
+			return obj;
 		},
 		/**
 		 * This method parses every value. If the value is an object it will unwind
@@ -119,31 +93,31 @@ module.exports = (function () {
 		 * @return {*}			  The parsed value.
 		 */
 		parseValue: function (parent, value) {
-			if (_.isPlainObject(value)) {
-				// Unwind the object
-				return _this.unwind(value);
-			} else if (_.isArray(value)) {
+			if (Array.isArray(value)) {
 				// Iterate over the array
-				return _.map(value, function (val) {
-					return _this.parseValue(parent, val);
+				return value.map(function (val) {
+					return $this.parseValue(parent, val);
 				});
-			} else if (_.isString(value) && value.indexOf('=') === 0) {
+			} else if (typeof value === 'object') {
+				// Unwind the object
+				return $this.unwind(value);
+			} else if (typeof value === 'string' && value.indexOf('=') === 0) {
 				// Evaluate the expression
 				try {
-					// Assign the object to the _this property
-					var base = {_this: parent};
+					// Assign the object to the $this property
+					var base = {$this: parent};
 
 					// Create a new combined context
-					var ctx = vm.createContext(objectAssign(base, _this.sandbox));
+					var ctx = vm.createContext(Object.assign(base, $this.sandbox));
 
 					// Run in the new context
-					return vm.runInContext(value.substr(1).replace(/this\./g, '_this.'), ctx);
+					return vm.runInContext(value.substr(1).replace(/this\./g, '$this.'), ctx);
 				} catch (e) {
 					return value;
 				}
-			} else if (_.isString(value) && value.indexOf('->') === 0) {
+			} else if (typeof value === 'string' && value.indexOf('->') === 0) {
 				// Find the reference to the object
-				return _this.findReference(value.substr(2));
+				return $this.findReference(value.substr(2));
 			}
 
 			return value;
@@ -158,7 +132,7 @@ module.exports = (function () {
 		findReference: function (ref) {
 			var keys = ref.split('.');
 			var key = keys.shift();
-			var result = _this.result[key];
+			var result = $this.result[key];
 
 			if (!result) {
 				// If the result does not exist, return an empty
@@ -172,23 +146,22 @@ module.exports = (function () {
 
 			return result;
 		},
-		/**
-		 * This method logs an event to the screen and prepends the arguments with the current time.
-		 */
+
 		log: function (args) {
-			console.log(chalk.cyan(moment().format('HH:mm:ss')), args);
+			console.log(new Date().toISOString().slice(11,19), args);
 		}
 	};
 
 	return {
 		seed: function (data, options) {
-			_this.options = objectAssign(DEFAULT_OPTIONS, options);
-			_this.sandbox = {};
+			$this.options = Object.assign(DEFAULT_OPTIONS, options);
+			$this.sandbox = {};
 
-			return _this.seed(data);
+			return $this.seed(data);
 		},
 		connect: function (options) {
-			db.connect(options);
+			$this.dynamo = options.service ? options.service : new AWS.DynamoDb(options);
+			$this.docClient = new AWS.DynamoDB.DocumentClient({service: $this.dynamo});
 		}
 	};
 })();
