@@ -11,8 +11,9 @@ module.exports = (function () {
 	var $this = {
 		options: {},
 		sandbox: {},
-		seed: function (data) {
+		seed: function (dataFile) {
 			var self = this;
+			var data = require(dataFile);
 
 			try {
 				// Iterate over all the dependencies
@@ -31,7 +32,7 @@ module.exports = (function () {
 				var promises = Object.keys(data).map(tableName => {
 
 					// Schema path is relative to the referer (a data file)
-					var schemaPath = path.join(path.dirname(dataFile), data[tableName]['_schema']);
+					var schemaPath = path.resolve(path.dirname(dataFile), data[tableName]['_schema']);
 					var schema = require(schemaPath);
 
 					delete data['_schema'];
@@ -153,11 +154,11 @@ module.exports = (function () {
 	};
 
 	return {
-		seed: function (data, options) {
+		seed: function (dataFile, options) {
 			$this.options = Object.assign(DEFAULT_OPTIONS, options);
 			$this.sandbox = {};
 
-			return $this.seed(data);
+			return $this.seed(path.resolve(process.cwd(), dataFile));
 		},
 		connect: function (options) {
 			$this.Dynamo = options.service ? options.service : new AWS.DynamoDb(options);
