@@ -39,18 +39,18 @@ module.exports = (function () {
 					return ()=> {
 						var promise = Promise.resolve();
 						if (self.options.dropTables === true) {
-							promise = promise.then(()=> $this.dynamo.deleteTable({TableName: tableName}));
+							promise = promise.then(()=> $this.Dynamo.deleteTable({TableName: tableName}));
 						}
 
-						// Allways create the table
-						promise = promise.then(()=> $this.dynamo.createTable(schema));
+						// Always create the table
+						promise = promise.then(()=> $this.Dynamo.createTable(schema));
 
 						// Insert records promises
 						return promise.then(
 							()=> Promise.all(
 								(data[tableName].data||[]).map(record => {
 									var unwinded = $this.unwind(record);
-									return $this.docClient.insert({
+									return $this.dynamo.insert({
 										TableName: tableName,
 										Item: unwinded
 									});
@@ -160,8 +160,8 @@ module.exports = (function () {
 			return $this.seed(data);
 		},
 		connect: function (options) {
-			$this.dynamo = options.service ? options.service : new AWS.DynamoDb(options);
-			$this.docClient = new AWS.DynamoDB.DocumentClient({service: $this.dynamo});
+			$this.Dynamo = options.service ? options.service : new AWS.DynamoDb(options);
+			$this.dynamo = new AWS.DynamoDB.DocumentClient({service: $this.Dynamo});
 		}
 	};
 })();
