@@ -40,7 +40,7 @@ module.exports = (function () {
 					return ()=> {
 						var promise = Promise.resolve();
 						if (self.options.dropTables === true) {
-							promise = promise.then(()=> $this.Dynamo.deleteTableAsync({TableName: tableName}));
+							promise = promise.then(()=> $this.Dynamo.deleteTableAsync({TableName: tableName})).catch(e=>{});
 						}
 
 						// Always create the table
