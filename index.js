@@ -40,18 +40,18 @@ module.exports = (function () {
 					return ()=> {
 						var promise = Promise.resolve();
 						if (self.options.dropTables === true) {
-							promise = promise.then(()=> $this.Dynamo.deleteTable({TableName: tableName}));
+							promise = promise.then(()=> $this.Dynamo.deleteTableAsync({TableName: tableName}));
 						}
 
 						// Always create the table
-						promise = promise.then(()=> $this.Dynamo.createTable(schema));
+						promise = promise.then(()=> $this.Dynamo.createTableAsync(schema));
 
 						// Insert records promises
 						return promise.then(
 							()=> Promise.all(
 								(data[tableName].data||[]).map(record => {
 									var unwinded = $this.unwind(record);
-									return $this.dynamo.insert({
+									return $this.dynamo.putAsync({
 										TableName: tableName,
 										Item: unwinded
 									});
@@ -153,6 +153,19 @@ module.exports = (function () {
 		}
 	};
 
+	function promisify($func) {
+		return function(){
+			var self = this;
+			var args = [].slice.call(arguments, 0);
+			return new Promise(function(resolve, reject){
+				$func.apply(self, args.concat([function(err, data){
+					if(err) reject(err);
+					else resolve(data);
+				}]));
+			});
+		};
+	}
+
 	return {
 		seed: function (dataFile, options) {
 			$this.options = Object.assign(DEFAULT_OPTIONS, options);
@@ -162,7 +175,11 @@ module.exports = (function () {
 		},
 		connect: function (options) {
 			$this.Dynamo = options.service ? options.service : new AWS.DynamoDb(options);
+			$this.Dynamo.createTableAsync = promisify($this.Dynamo.createTable);
+			$this.Dynamo.deleteTableAsync = promisify($this.Dynamo.deleteTable);
+
 			$this.dynamo = new AWS.DynamoDB.DocumentClient({service: $this.Dynamo});
+			$this.dynamo.putAsync = promisify($this.dynamo.put);
 		}
 	};
 })();
