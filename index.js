@@ -175,11 +175,14 @@ module.exports = (function () {
 		},
 		connect: function (options) {
 			$this.Dynamo = options.service ? options.service : new AWS.DynamoDb(options);
-			$this.Dynamo.createTableAsync = promisify($this.Dynamo.createTable);
-			$this.Dynamo.deleteTableAsync = promisify($this.Dynamo.deleteTable);
+			if(!$this.Dynamo.createTableAsync)
+				$this.Dynamo.createTableAsync = promisify($this.Dynamo.createTable);
+			if(!$this.Dynamo.deleteTableAsync)
+				$this.Dynamo.deleteTableAsync = promisify($this.Dynamo.deleteTable);
 
 			$this.dynamo = new AWS.DynamoDB.DocumentClient({service: $this.Dynamo});
-			$this.dynamo.putAsync = promisify($this.dynamo.put);
+			if(!$this.dynamo.putAsync)
+				$this.dynamo.putAsync = promisify($this.dynamo.put);
 		}
 	};
 })();
